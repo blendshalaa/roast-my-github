@@ -58,7 +58,7 @@ export async function fetchGitHubData(username) {
       stars: r.stargazers_count,
       forks: r.forks_count,
       topics: r.topics || [],
-      updatedAt: r.updated_at,
+      pushedAt: r.pushed_at,
       isFork: r.fork,
       isArchived: r.archived,
       openIssues: r.open_issues_count,
