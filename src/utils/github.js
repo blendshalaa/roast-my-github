@@ -13,13 +13,19 @@ export async function fetchGitHubData(username) {
   const userRes = await fetch(`https://api.github.com/users/${username}`, { headers })
 
   if (userRes.status === 404) {
-    throw new Error(`GitHub user "${username}" not found. Double-check the username!`)
+    const err = new Error(`No GitHub user found for "${username}".`)
+    err.code = 'USER_NOT_FOUND'
+    throw err
   }
   if (userRes.status === 403) {
-    throw new Error('GitHub API rate limit exceeded. Add a VITE_GITHUB_TOKEN to your .env to increase limits.')
+    const err = new Error('GitHub API rate limit exceeded. Add VITE_GITHUB_TOKEN to your .env.')
+    err.code = 'RATE_LIMITED'
+    throw err
   }
   if (!userRes.ok) {
-    throw new Error(`GitHub API error: ${userRes.status} ${userRes.statusText}`)
+    const err = new Error(`GitHub API error: ${userRes.status} ${userRes.statusText}`)
+    err.code = 'GITHUB_ERROR'
+    throw err
   }
 
   const user = await userRes.json()

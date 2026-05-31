@@ -2,67 +2,74 @@ import { useState, useRef, useCallback } from 'react'
 import Header from './components/Header'
 import RoastForm from './components/RoastForm'
 import RoastOutput from './components/RoastOutput'
-import ErrorMessage from './components/ErrorMessage'
 import { fetchGitHubData } from './utils/github'
 import { streamRoast } from './utils/openai'
 
+// status machine: idle → loading → streaming → done  (or → error at any point)
 export default function App() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [status, setStatus]       = useState('idle')   // idle | loading | streaming | done | error
   const [roastText, setRoastText] = useState('')
-  const [error, setError] = useState('')
+  const [errorMsg, setErrorMsg]   = useState('')
   const [githubUser, setGithubUser] = useState(null)
   const [activeStyle, setActiveStyle] = useState('')
-  const abortRef = useRef(null)
+  const abortRef    = useRef(null)
+  const firstChunk  = useRef(false)
 
   const handleRoast = useCallback(async (username, style) => {
-    // Cancel any in-flight request
     if (abortRef.current) abortRef.current.abort()
     abortRef.current = new AbortController()
+    firstChunk.current = false
 
-    setError('')
+    setStatus('loading')
     setRoastText('')
+    setErrorMsg('')
     setGithubUser(null)
     setActiveStyle(style)
-    setIsLoading(true)
 
     try {
-      // 1. Fetch GitHub data
+      // Phase 1 — fetch GitHub data (cycling loader shows here)
       const { user, summary } = await fetchGitHubData(username)
       setGithubUser(user)
-      setIsLoading(false)
-      setIsStreaming(true)
 
-      // 2. Stream the roast
+      // Phase 2 — stream roast (loader keeps showing until first token)
       await streamRoast(
         summary,
         style,
-        (chunk) => setRoastText((prev) => prev + chunk),
+        (chunk) => {
+          // Transition to streaming on first token
+          if (!firstChunk.current) {
+            firstChunk.current = true
+            setStatus('streaming')
+          }
+          setRoastText((prev) => prev + chunk)
+        },
         abortRef.current.signal
       )
+
+      setStatus('done')
     } catch (err) {
       if (err.name === 'AbortError') return
-      setError(err.message || 'An unexpected error occurred.')
-    } finally {
-      setIsLoading(false)
-      setIsStreaming(false)
+
+      const friendlyMsg = err.code === 'USER_NOT_FOUND'
+        ? "Never heard of them. Try a real username."
+        : "Something went wrong. Try again."
+
+      setErrorMsg(friendlyMsg)
+      setStatus('error')
     }
   }, [])
 
   function handleReset() {
     if (abortRef.current) abortRef.current.abort()
+    setStatus('idle')
     setRoastText('')
-    setError('')
+    setErrorMsg('')
     setGithubUser(null)
-    setIsLoading(false)
-    setIsStreaming(false)
   }
-
-  const showOutput = roastText || isStreaming
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Background particles */}
+      {/* Background blobs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
         <div className="absolute top-1/4 -left-20 w-72 h-72 bg-brand-600/5 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-600/5 rounded-full blur-3xl" />
@@ -70,51 +77,27 @@ export default function App() {
       </div>
 
       <div className="relative z-10 flex-1 flex flex-col max-w-2xl mx-auto w-full px-4 pb-16">
-        {/* Header */}
         <Header />
 
-        {/* Main content */}
         <main className="flex flex-col gap-5">
-          {/* Form (always visible) */}
-          {!showOutput && (
-            <RoastForm onSubmit={handleRoast} isLoading={isLoading} />
-          )}
+          {/* Form — always visible */}
+          <RoastForm
+            onSubmit={handleRoast}
+            isLoading={status === 'loading' || status === 'streaming'}
+          />
 
-          {/* Loading state (fetching GitHub data) */}
-          {isLoading && (
-            <div className="glass-card p-6 flex items-center gap-4 animate-fade-in">
-              <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
-              <div>
-                <p className="text-sm font-medium text-gray-300">Fetching GitHub data…</p>
-                <p className="text-xs text-gray-600 mt-0.5">Preparing the evidence</p>
-              </div>
-            </div>
-          )}
-
-          {/* Error */}
-          <ErrorMessage message={error} onDismiss={() => setError('')} />
-
-          {/* Roast output */}
-          {showOutput && (
-            <RoastOutput
-              roastText={roastText}
-              isStreaming={isStreaming}
-              user={githubUser}
-              style={activeStyle}
-              onReset={handleReset}
-            />
-          )}
-
-          {/* After stream ends, show form again for another roast */}
-          {showOutput && !isStreaming && (
-            <div className="animate-fade-in">
-              <RoastForm onSubmit={handleRoast} isLoading={isLoading} />
-            </div>
-          )}
+          {/* Output panel — always visible, switches between idle/loading/streaming/done/error */}
+          <RoastOutput
+            status={status}
+            roastText={roastText}
+            errorMsg={errorMsg}
+            user={githubUser}
+            style={activeStyle}
+            onReset={handleReset}
+          />
         </main>
       </div>
 
-      {/* Footer */}
       <footer className="relative z-10 text-center py-6 text-xs text-gray-700">
         Built with GPT-4o &amp; the GitHub API · No repos were harmed in the making of this roast
       </footer>
